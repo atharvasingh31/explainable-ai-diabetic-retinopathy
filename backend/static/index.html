@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RetinaScan XAI — Diabetic Retinopathy Screening System</title>
+  <link rel="stylesheet" href="/static/index.css" />
+  <!-- React 18 & ReactDOM via CDN (with robust fallback) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>
+    // Fallback if CDN is unreachable in offline environments
+    const e = React.createElement;
+    const { useState, useEffect, useRef } = React;
+
+    const GRADE_CONFIG = {
+      0: { name: 'No Diabetic Retinopathy', badge: 'grade-0', desc: 'Normal Retinal Presentation' },
+      1: { name: 'Mild Diabetic Retinopathy', badge: 'grade-1', desc: 'Microaneurysms Detected' },
+      2: { name: 'Moderate Diabetic Retinopathy', badge: 'grade-2', desc: 'Multiple Lesions / Exudates' },
+      3: { name: 'Severe Diabetic Retinopathy', badge: 'grade-3', desc: 'Extensive Hemorrhages / IRMA' },
+      4: { name: 'Proliferative Diabetic Retinopathy', badge: 'grade-4', desc: 'Neovascularization Present' }
+    };
+
+    const PROB_CLASSES = [
+      { key: 'No DR', label: 'Grade 0: No DR', color: '#10b981' },
+      { key: 'Mild DR', label: 'Grade 1: Mild DR', color: '#3b82f6' },
+      { key: 'Moderate DR', label: 'Grade 2: Moderate DR', color: '#f59e0b' },
+      { key: 'Severe DR', label: 'Grade 3: Severe DR', color: '#f97316' },
+      { key: 'Proliferative DR', label: 'Grade 4: Proliferative DR', color: '#ef4444' }
+    ];
+
+    function App() {
+      const [backendStatus, setBackendStatus] = useState({ loaded: false, checking: true });
+      const [selectedFile, setSelectedFile] = useState(null);
+      const [previewUrl, setPreviewUrl] = useState(null);
+      const [isLoading, setIsLoading] = useState(false);
+      const [errorMsg, setErrorMsg] = useState(null);
+      const [result, setResult] = useState(null);
+      const [dragActive, setDragActive] = useState(false);
+      const [activeView, setActiveView] = useState('side-by-side');
+      const fileInputRef = useRef(null);
+
+      // Check health
+      useEffect(() => {
+        async function check() {
+          try {
+            const res = await fetch('/health');
+            const data = await res.json();
+            setBackendStatus({ loaded: data.model_loaded, checking: false });
+          } catch (err) {
+            setBackendStatus({ loaded: false, checking: false });
+          }
+        }
+        check();
+        const interval = setInterval(check, 10000);
+        return () => clearInterval(interval);
+      }, []);
+
+      const handleFile = (file) => {
+        setErrorMsg(null);
+        if (!file) return;
+
+        const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+        if (!validTypes.includes(file.type)) {
+          setErrorMsg('Invalid file format. Please upload a JPG, JPEG, or PNG fundus image.');
+          return;
+        }
+
+        if (file.size > 20 * 1024 * 1024) {
+          setErrorMsg('File size exceeds the 20MB limit.');
+          return;
+        }
+
+        setSelectedFile(file);
+        setPreviewUrl(URL.createObjectURL(file));
+      };
+
+      const handleAnalyze = async () => {
+        if (!selectedFile) return;
+        setIsLoading(true);
+        setErrorMsg(null);
+
+        const formData = new FormData();
+        formData.append('image', selectedFile);
+
+        try {
+          const res = await fetch('/predict', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!res.ok) {
+            let detail = 'Prediction failed';
+            try {
+              const err = await res.json();
+              detail = err.detail || detail;
+            } catch (_) {}
+            throw new Error(detail);
+          }
+
+          const data = await res.json();
+          setResult(data);
+        } catch (err) {
+          setErrorMsg(err.message || 'Failed to analyze retinal image.');
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      const handleReset = () => {
+        setSelectedFile(null);
+        setPreviewUrl(null);
+        setResult(null);
+        setErrorMsg(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      };
+
+      const handleLoadSample = async () => {
+        try {
+          const res = await fetch('/static/sample_fundus_retina.jpg');
+          const blob = await res.blob();
+          const file = new File([blob], 'sample_fundus_retina.jpg', { type: 'image/jpeg' });
+          handleFile(file);
+        } catch (err) {
+          setErrorMsg('Failed to load sample image.');
+        }
+      };
+
+      return e('div', { className: 'app-shell' },
+        // Header
+        e('header', { className: 'header-container' },
+          e('div', { className: 'header-brand' },
+            e('div', { className: 'logo-icon' },
+              e('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                e('circle', { cx: '12', cy: '12', r: '3' }),
+                e('path', { d: 'M2.05 12a10 10 0 0 1 19.9 0' }),
+                e('path', { d: 'M2.05 12a10 10 0 0 0 19.9 0' })
+              )
+            ),
+            e('div', null,
+              e('h1', { className: 'header-title' }, 'RetinaScan XAI'),
+              e('p', { className: 'header-subtitle' }, 'Explainable AI Diabetic Retinopathy Screening Platform')
+            )
+          ),
+          e('div', { className: 'header-meta' },
+            e('div', { className: 'model-badge' },
+              e('span', { className: 'badge-label' }, 'Model:'),
+              e('span', { className: 'badge-value' }, 'EfficientNet-B0')
+            ),
+            e('div', { className: `status-pill ${backendStatus.loaded ? 'online' : 'offline'}` },
+              e('span', { className: 'status-dot' }),
+              e('span', null, backendStatus.loaded ? 'Model Ready' : (backendStatus.checking ? 'Connecting...' : 'Backend Offline'))
+            )
+          )
+        ),
+
+        // Main Content
+        e('main', { className: 'main-content' },
+          errorMsg && e('div', { className: 'alert-banner error' },
+            e('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', className: 'alert-icon' },
+              e('circle', { cx: '12', cy: '12', r: '10' }),
+              e('line', { x1: '15', y1: '9', x2: '9', y2: '15' }),
+              e('line', { x1: '9', y1: '9', x2: '15', y2: '15' })
+            ),
+            e('div', null,
+              e('strong', null, 'Error: '),
+              e('span', null, errorMsg)
+            ),
+            e('button', { className: 'btn-close-alert', onClick: () => setErrorMsg(null) }, 'Dismiss')
+          ),
+
+          !result ? e('div', { className: 'upload-section-wrapper' },
+            e('div', { className: 'welcome-banner' },
+              e('h2', null, 'AI-Assisted Diabetic Retinopathy Screening'),
+              e('p', null, 'Automated clinical grading of fundus photography using EfficientNet-B0 with integrated Grad-CAM explainability, Image Quality validation, and referral decision support.')
+            ),
+
+            e('div', { className: 'upload-card' },
+              e('div', { className: 'card-header' },
+                e('h2', { className: 'card-title' }, 'Retinal Fundus Image Upload'),
+                e('p', { className: 'card-description' }, 'Upload a standard macula-centered or disc-centered retinal photograph (JPG, JPEG, or PNG format).')
+              ),
+
+              !previewUrl ? e('div', {
+                className: `dropzone ${dragActive ? 'active' : ''}`,
+                onDragEnter: (e) => { e.preventDefault(); setDragActive(true); },
+                onDragLeave: (e) => { e.preventDefault(); setDragActive(false); },
+                onDragOver: (e) => e.preventDefault(),
+                onDrop: (e) => {
+                  e.preventDefault();
+                  setDragActive(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+                },
+                onClick: () => fileInputRef.current?.click()
+              },
+                e('input', {
+                  ref: fileInputRef,
+                  type: 'file',
+                  accept: '.jpg,.jpeg,.png,image/jpeg,image/png',
+                  style: { display: 'none' },
+                  onChange: (e) => { if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]); }
+                }),
+                e('div', { className: 'dropzone-icon' },
+                  e('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                    e('path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }),
+                    e('polyline', { points: '17 8 12 3 7 8' }),
+                    e('line', { x1: '12', y1: '3', x2: '12', y2: '15' })
+                  )
+                ),
+                e('p', { className: 'dropzone-text' }, e('strong', null, 'Click to upload'), ' or drag and drop retinal image'),
+                e('p', { className: 'dropzone-hint' }, 'Supported formats: JPG, JPEG, PNG (Max: 20MB)'),
+                e('button', {
+                  type: 'button',
+                  className: 'btn-sample',
+                  onClick: (e) => { e.stopPropagation(); handleLoadSample(); }
+                }, 'Load built-in sample retina')
+              ) : e('div', { className: 'preview-container' },
+                e('div', { className: 'preview-image-wrapper' },
+                  e('img', { src: previewUrl, alt: 'Retinal Preview', className: 'preview-image' }),
+                  e('div', { className: 'preview-overlay-info' },
+                    e('span', { className: 'file-name' }, selectedFile?.name),
+                    e('span', { className: 'file-size' }, selectedFile ? (selectedFile.size / 1024).toFixed(1) + ' KB' : '')
+                  )
+                ),
+                e('div', { className: 'preview-actions' },
+                  e('button', {
+                    type: 'button',
+                    className: 'btn btn-secondary',
+                    onClick: handleReset,
+                    disabled: isLoading
+                  }, 'Change Image'),
+                  e('button', {
+                    type: 'button',
+                    className: 'btn btn-primary',
+                    onClick: handleAnalyze,
+                    disabled: isLoading
+                  }, isLoading ? 'Analyzing Retina...' : 'Analyze Retina')
+                )
+              )
+            ),
+
+            isLoading && e('div', { className: 'loading-state-card' },
+              e('div', { className: 'pulse-loader' }, e('div', { className: 'pulse-circle' })),
+              e('h3', null, 'Analyzing retinal image...'),
+              e('p', { className: 'loading-subtext' }, 'Evaluating image quality, executing EfficientNet-B0 inference, and computing Grad-CAM feature activations...'),
+              e('div', { className: 'loading-steps' },
+                e('div', { className: 'step-item active' }, 'Image Preprocessing'),
+                e('div', { className: 'step-item active' }, 'Quality Metrics'),
+                e('div', { className: 'step-item active' }, 'Deep Learning Inference'),
+                e('div', { className: 'step-item active' }, 'Grad-CAM Heatmap')
+              )
+            ),
+
+            // Medical Disclaimer
+            e('div', { className: 'disclaimer-banner' },
+              e('div', { className: 'disclaimer-icon' },
+                e('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                  e('path', { d: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z' }),
+                  e('line', { x1: '12', y1: '9', x2: '12', y2: '13' }),
+                  e('line', { x1: '12', y1: '17', x2: '12.01', y2: '17' })
+                )
+              ),
+              e('div', { className: 'disclaimer-content' },
+                e('h4', { className: 'disclaimer-title' }, 'Clinical & Medical Disclaimer'),
+                e('p', { className: 'disclaimer-text' }, 'This tool is an AI-assisted screening system and is not a substitute for professional medical diagnosis. Results should be reviewed by a qualified healthcare professional.')
+              )
+            )
+          ) : e('div', { className: 'results-container' },
+            // Top Bar
+            e('div', { className: 'results-top-bar' },
+              e('div', null,
+                e('span', { className: 'results-eyebrow' }, 'Screening Complete'),
+                e('h2', { className: 'results-heading' }, 'Diabetic Retinopathy Analysis Report')
+              ),
+              e('button', { type: 'button', className: 'btn btn-secondary', onClick: handleReset },
+                'Screen Another Image'
+              )
+            ),
+
+            // 3 Primary Result Cards
+            e('div', { className: 'primary-cards-grid' },
+              // Diagnosis Card
+              e('div', { className: 'result-card main-grade-card' },
+                e('div', { className: 'card-top' },
+                  e('span', { className: 'card-kicker' }, 'Diabetic Retinopathy Grade'),
+                  e('span', { className: `grade-number-badge ${GRADE_CONFIG[result.prediction.grade]?.badge}` }, `Grade ${result.prediction.grade}`)
+                ),
+                e('h3', { className: 'diagnosis-title' }, result.prediction.diagnosis),
+                e('p', { className: 'diagnosis-desc' }, GRADE_CONFIG[result.prediction.grade]?.desc)
+              ),
+
+              // Confidence Card
+              e('div', { className: 'result-card confidence-card' },
+                e('div', { className: 'card-top' },
+                  e('span', { className: 'card-kicker' }, 'Model Confidence'),
+                  e('span', { className: 'confidence-pill' }, `${result.prediction.confidence.toFixed(1)}%`)
+                ),
+                e('div', { className: 'confidence-meter-container' },
+                  e('div', { className: 'confidence-meter-track' },
+                    e('div', { className: 'confidence-meter-fill', style: { width: `${result.prediction.confidence}%` } })
+                  ),
+                  e('p', { className: 'confidence-note' }, 'Estimated statistical probability of the predicted class. Represents model confidence, not medical certainty.')
+                )
+              ),
+
+              // Referral Card
+              e('div', { className: `result-card referral-card ${result.prediction.referable ? 'refer-active' : 'not-refer-active'}` },
+                e('div', { className: 'card-top' },
+                  e('span', { className: 'card-kicker' }, 'Referral Decision'),
+                  e('span', { className: 'referral-type-label' }, result.prediction.referable ? 'Specialist Evaluation Required' : 'Routine Monitoring')
+                ),
+                e('div', { className: 'referral-status-banner' },
+                  e('span', { className: 'referral-badge-text' }, result.prediction.referral_status)
+                ),
+                e('p', { className: 'referral-action-text' },
+                  result.prediction.referable
+                    ? 'Recommendation: Patient demonstrates referable diabetic retinopathy signs (Grade ≥ 2). Prompt in-person ophthalmologist review is advised.'
+                    : 'Recommendation: Non-referable screening result (Grade 0–1). Continue annual regular diabetic eye screening.'
+                )
+              )
+            ),
+
+            // Patient Summary Callout
+            e('div', { className: 'patient-summary-callout' },
+              e('div', { className: 'patient-callout-icon' },
+                e('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                  e('path', { d: 'M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2' }),
+                  e('circle', { cx: '8.5', cy: '7.5', r: '4' }),
+                  e('polyline', { points: '17 11 19 13 23 9' })
+                )
+              ),
+              e('div', { className: 'patient-callout-content' },
+                e('h4', null, 'Patient-Friendly Screening Summary'),
+                e('p', null,
+                  `AI screening result indicates ${result.prediction.diagnosis}. `,
+                  result.prediction.referable
+                    ? 'Professional medical review by an eye care specialist is recommended for formal diagnostic examination and staging.'
+                    : 'No immediate sight-threatening retinopathy indicated. Regular annual diabetic eye checks should continue.'
+                )
+              )
+            ),
+
+            // Explainable AI (Grad-CAM) Card
+            e('div', { className: 'gradcam-card' },
+              e('div', { className: 'gradcam-header' },
+                e('div', null,
+                  e('h3', { className: 'section-title' }, 'Explainable AI (Grad-CAM Visualization)'),
+                  e('p', { className: 'section-subtitle' }, `Gradient-weighted Class Activation Mapping highlighting retinal features influencing prediction for Grade ${result.prediction.grade}: ${result.prediction.diagnosis}.`)
+                ),
+                e('div', { className: 'view-toggle' },
+                  e('button', {
+                    type: 'button',
+                    className: `btn-toggle ${activeView === 'side-by-side' ? 'active' : ''}`,
+                    onClick: () => setActiveView('side-by-side')
+                  }, 'Side-by-Side'),
+                  e('button', {
+                    type: 'button',
+                    className: `btn-toggle ${activeView === 'overlay' ? 'active' : ''}`,
+                    onClick: () => setActiveView('overlay')
+                  }, 'Heatmap Focus')
+                )
+              ),
+
+              e('div', { className: 'xai-explanation-banner' },
+                e('div', { className: 'xai-info-icon' },
+                  e('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                    e('circle', { cx: '12', cy: '12', r: '10' }),
+                    e('line', { x1: '12', y1: '16', x2: '12', y2: '12' }),
+                    e('line', { x1: '12', y1: '8', x2: '12.01', y2: '8' })
+                  )
+                ),
+                e('div', { className: 'xai-info-text' },
+                  e('strong', null, 'Why did the model make this prediction?'),
+                  e('p', null, 'The highlighted regions indicate areas that influenced the model’s prediction. Warmer colors (red, yellow) identify spatial regions in the retinal fundus with strongest positive influence on the EfficientNet-B0 convolutional feature maps. Grad-CAM shows features contributing to the grade prediction but does not replace expert lesion annotation.')
+                )
+              ),
+
+              activeView === 'side-by-side' ? e('div', { className: 'images-comparison-grid' },
+                e('div', { className: 'image-card' },
+                  e('div', { className: 'image-card-header' },
+                    e('span', { className: 'image-badge' }, 'Original Fundus'),
+                    e('span', { className: 'image-meta' }, 'Patient Input Image')
+                  ),
+                  e('div', { className: 'image-frame' },
+                    e('img', { src: previewUrl, alt: 'Original Fundus', className: 'responsive-fundus' })
+                  )
+                ),
+                e('div', { className: 'image-card' },
+                  e('div', { className: 'image-card-header' },
+                    e('span', { className: 'image-badge xai-badge' }, 'Grad-CAM Explanation'),
+                    e('span', { className: 'image-meta' }, 'EfficientNet-B0 Conv-Head')
+                  ),
+                  e('div', { className: 'image-frame' },
+                    e('img', { src: result.gradcam, alt: 'Grad-CAM Overlay', className: 'responsive-fundus' })
+                  )
+                )
+              ) : e('div', { className: 'single-focus-container' },
+                e('div', { className: 'image-card focus-card' },
+                  e('div', { className: 'image-card-header' },
+                    e('span', { className: 'image-badge xai-badge' }, 'Grad-CAM Overlay Focus'),
+                    e('span', { className: 'image-meta' }, 'High Attention Regions')
+                  ),
+                  e('div', { className: 'image-frame' },
+                    e('img', { src: result.gradcam, alt: 'Grad-CAM Overlay', className: 'responsive-fundus focus-image' })
+                  )
+                )
+              ),
+
+              e('div', { className: 'heatmap-legend' },
+                e('span', { className: 'legend-label' }, 'Activation Intensity:'),
+                e('div', { className: 'legend-gradient' },
+                  e('span', { className: 'legend-min' }, 'Low Attention'),
+                  e('div', { className: 'gradient-bar' }),
+                  e('span', { className: 'legend-max' }, 'High Attention')
+                )
+              )
+            ),
+
+            // Analytics Grid (Probabilities + Quality)
+            e('div', { className: 'analytics-grid' },
+              // Probabilities
+              e('div', { className: 'probabilities-card' },
+                e('h3', { className: 'section-title' }, 'Model Class Probabilities'),
+                e('p', { className: 'section-subtitle' }, 'Softmax probabilities across all 5 clinical stages calculated by the production model.'),
+                e('div', { className: 'prob-bars-container' },
+                  PROB_CLASSES.map((item, idx) => {
+                    const val = result.probabilities[item.key] ?? 0;
+                    const isPred = result.prediction.grade === idx;
+                    return e('div', { key: item.key, className: `prob-row ${isPred ? 'highlight-row' : ''}` },
+                      e('div', { className: 'prob-header' },
+                        e('span', { className: 'prob-label' },
+                          item.label,
+                          isPred && e('span', { className: 'predicted-tag' }, 'Predicted')
+                        ),
+                        e('span', { className: 'prob-value' }, `${val.toFixed(1)}%`)
+                      ),
+                      e('div', { className: 'progress-track' },
+                        e('div', {
+                          className: 'progress-fill',
+                          style: { width: `${Math.min(100, Math.max(0, val))}%`, backgroundColor: item.color }
+                        })
+                      )
+                    );
+                  })
+                )
+              ),
+
+              // Image Quality Metrics
+              e('div', { className: 'quality-card' },
+                e('div', { className: 'quality-header' },
+                  e('h3', { className: 'section-title' }, 'Image Quality Assessment'),
+                  e('span', { className: 'info-badge' }, 'Objective Metrics')
+                ),
+                e('p', { className: 'section-subtitle' }, 'Deterministic quality metrics computed using Laplacian variance and grayscale intensity distribution.'),
+                e('div', { className: 'quality-grid' },
+                  e('div', { className: 'metric-box' },
+                    e('div', { className: 'metric-icon blur-icon' },
+                      e('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                        e('circle', { cx: '12', cy: '12', r: '10' }),
+                        e('line', { x1: '12', y1: '8', x2: '12', y2: '12' }),
+                        e('line', { x1: '12', y1: '16', x2: '12.01', y2: '16' })
+                      )
+                    ),
+                    e('div', { className: 'metric-content' },
+                      e('span', { className: 'metric-label' }, 'Blur Score (Laplacian)'),
+                      e('span', { className: 'metric-value' }, result.quality?.blur?.toFixed(1) ?? 'N/A'),
+                      e('span', { className: 'metric-desc' }, 'Laplacian operator variance reflecting edge sharpness.')
+                    )
+                  ),
+                  e('div', { className: 'metric-box' },
+                    e('div', { className: 'metric-icon brightness-icon' },
+                      e('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                        e('circle', { cx: '12', cy: '12', r: '5' }),
+                        e('line', { x1: '12', y1: '1', x2: '12', y2: '3' }),
+                        e('line', { x1: '12', y1: '21', x2: '12', y2: '23' }),
+                        e('line', { x1: '4.22', y1: '4.22', x2: '5.64', y2: '5.64' }),
+                        e('line', { x1: '18.36', y1: '18.36', x2: '19.78', y2: '19.78' }),
+                        e('line', { x1: '1', y1: '12', x2: '3', y2: '12' }),
+                        e('line', { x1: '21', y1: '12', x2: '23', y2: '12' })
+                      )
+                    ),
+                    e('div', { className: 'metric-content' },
+                      e('span', { className: 'metric-label' }, 'Brightness (Mean Intensity)'),
+                      e('span', { className: 'metric-value' }, result.quality?.brightness?.toFixed(1) ?? 'N/A'),
+                      e('span', { className: 'metric-desc' }, 'Mean grayscale pixel luminosity (0–255).')
+                    )
+                  ),
+                  e('div', { className: 'metric-box' },
+                    e('div', { className: 'metric-icon contrast-icon' },
+                      e('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                        e('circle', { cx: '12', cy: '12', r: '10' }),
+                        e('path', { d: 'M12 2a10 10 0 0 0 0 20z', fill: 'currentColor', opacity: '0.3' })
+                      )
+                    ),
+                    e('div', { className: 'metric-content' },
+                      e('span', { className: 'metric-label' }, 'Contrast (Std Deviation)'),
+                      e('span', { className: 'metric-value' }, result.quality?.contrast?.toFixed(1) ?? 'N/A'),
+                      e('span', { className: 'metric-desc' }, 'Grayscale intensity standard deviation.')
+                    )
+                  )
+                )
+              )
+            ),
+
+            // Disclaimer
+            e('div', { className: 'disclaimer-banner' },
+              e('div', { className: 'disclaimer-icon' },
+                e('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                  e('path', { d: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z' }),
+                  e('line', { x1: '12', y1: '9', x2: '12', y2: '13' }),
+                  e('line', { x1: '12', y1: '17', x2: '12.01', y2: '17' })
+                )
+              ),
+              e('div', { className: 'disclaimer-content' },
+                e('h4', { className: 'disclaimer-title' }, 'Clinical & Medical Disclaimer'),
+                e('p', { className: 'disclaimer-text' }, 'This tool is an AI-assisted screening system and is not a substitute for professional medical diagnosis. Results should be reviewed by a qualified healthcare professional.')
+              )
+            )
+          )
+        ),
+
+        // Footer
+        e('footer', { className: 'footer-container' },
+          e('p', null, 'Smart India Hackathon 2026 | Explainable AI Diabetic Retinopathy Screening System'),
+          e('p', { className: 'footer-sub' }, 'Trained on APTOS 2019 Blindness Detection Dataset • EfficientNet-B0 Architecture')
+        )
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(e(App));
+  </script>
+</body>
+</html>

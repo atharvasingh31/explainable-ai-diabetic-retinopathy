@@ -1,0 +1,14 @@
+.DS_Store
+venv/
+venv.vnosync/
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+.env
+.ipynb_checkpoints/
+venv/
+venv.nosync/
+venv.vnosync/
+venv
+venv
